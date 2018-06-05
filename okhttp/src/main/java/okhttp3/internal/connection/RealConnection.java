@@ -49,6 +49,7 @@ import okhttp3.Protocol;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.Route;
+import okhttp3.internal.ws.Streams;
 import okhttp3.internal.Internal;
 import okhttp3.internal.Util;
 import okhttp3.internal.Version;
@@ -61,7 +62,6 @@ import okhttp3.internal.http2.Http2Connection;
 import okhttp3.internal.http2.Http2Stream;
 import okhttp3.internal.platform.Platform;
 import okhttp3.internal.tls.OkHostnameVerifier;
-import okhttp3.internal.ws.RealWebSocket;
 import okio.BufferedSink;
 import okio.BufferedSource;
 import okio.Okio;
@@ -507,8 +507,8 @@ public final class RealConnection extends Http2Connection.Listener implements Co
     }
   }
 
-  public RealWebSocket.Streams newWebSocketStreams(final StreamAllocation streamAllocation) {
-    return new RealWebSocket.Streams(true, source, sink) {
+  public Streams newStreams(final StreamAllocation streamAllocation) {
+    return new Streams(true, source, sink) {
       @Override public void close() throws IOException {
         streamAllocation.streamFinished(true, streamAllocation.codec(), -1L, null);
       }

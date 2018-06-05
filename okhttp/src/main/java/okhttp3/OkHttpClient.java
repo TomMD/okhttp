@@ -47,7 +47,8 @@ import okhttp3.internal.connection.StreamAllocation;
 import okhttp3.internal.platform.Platform;
 import okhttp3.internal.tls.CertificateChainCleaner;
 import okhttp3.internal.tls.OkHostnameVerifier;
-import okhttp3.internal.ws.RealWebSocket;
+import okhttp3.internal.ws.Http11Upgrade;
+import okhttp3.internal.ws.WebsocketUpgradeHandler;
 import okio.Sink;
 import okio.Source;
 
@@ -190,7 +191,7 @@ public class OkHttpClient implements Cloneable, Call.Factory, WebSocket.Factory 
         return ((RealCall) call).streamAllocation();
       }
 
-      @Override public Call newWebSocketCall(OkHttpClient client, Request originalRequest) {
+      @Override public Call newStreamsCall(OkHttpClient client, Request originalRequest) {
         return RealCall.newRealCall(client, originalRequest, true);
       }
     };
@@ -438,9 +439,11 @@ public class OkHttpClient implements Cloneable, Call.Factory, WebSocket.Factory 
    * Uses {@code request} to connect a new web socket.
    */
   @Override public WebSocket newWebSocket(Request request, WebSocketListener listener) {
-    RealWebSocket webSocket = new RealWebSocket(request, listener, new Random(), pingInterval);
-    webSocket.connect(this);
-    return webSocket;
+    WebsocketUpgradeHandler upgradeHandler =
+        new WebsocketUpgradeHandler(request, listener, new Random(), pingInterval);
+
+    Http11Upgrade upgrade = new Http11Upgrade();
+    return upgrade.connect(this, request, upgradeHandler);
   }
 
   public Builder newBuilder() {

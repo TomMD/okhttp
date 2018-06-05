@@ -343,7 +343,7 @@ public final class RealWebSocketTest {
   }
 
   /** One peer's streams, listener, and web socket in the test. */
-  private static class TestStreams extends RealWebSocket.Streams {
+  private static class TestStreams extends Streams {
     private final String name;
     private final WebSocketRecorder listener;
     private RealWebSocket webSocket;
