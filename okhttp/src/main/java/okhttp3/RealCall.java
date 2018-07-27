@@ -18,6 +18,9 @@ package okhttp3;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+
+import java.util.concurrent.RejectedExecutionException;
+
 import okhttp3.internal.NamedRunnable;
 import okhttp3.internal.cache.CacheInterceptor;
 import okhttp3.internal.connection.ConnectInterceptor;
@@ -97,7 +100,12 @@ final class RealCall implements Call {
     }
     captureCallStackTrace();
     eventListener.callStart(this);
-    client.dispatcher().enqueue(new AsyncCall(responseCallback));
+    try {
+      client.dispatcher().enqueue(new AsyncCall(responseCallback));
+    } catch (RejectedExecutionException e) {
+      responseCallback.onFailure(RealCall.this,
+        new IOException("unable to enqueue to dispatcher", e));
+    }
   }
 
   @Override public void cancel() {
