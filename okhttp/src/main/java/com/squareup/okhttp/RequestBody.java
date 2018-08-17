@@ -43,11 +43,11 @@ public abstract class RequestBody {
    * contentType} lacks a charset, this will use UTF-8.
    */
   public static RequestBody create(MediaType contentType, String content) {
-    Charset charset = Util.UTF_8;
+    Charset charset; //  = Util.UTF_8;
     if (contentType != null) {
       charset = contentType.charset();
       if (charset == null) {
-        charset = Util.UTF_8;
+        // charset = Util.UTF_8;
         contentType = MediaType.parse(contentType + "; charset=utf-8");
       }
     }
