@@ -1,1 +1,2 @@
+verifiers   = []
 customTools = ["https://docs.muse.dev/scripts/pmd.sh rulesets/java/quickstart.xml"]
