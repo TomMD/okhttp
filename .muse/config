@@ -1,2 +1,5 @@
+# An empty "verifiers" means don't run any of the default tools.
 verifiers   = []
+
+# The 'customTools' are not affected by the verifiers list.
 customTools = ["https://docs.muse.dev/scripts/pmd.sh rulesets/java/quickstart.xml"]
