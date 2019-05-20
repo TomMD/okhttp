@@ -136,14 +136,14 @@ fun nonEmptyIntersection(
   return false
 }
 
-fun hostHeader(url: HttpUrl, includeDefaultPort: Boolean): String {
-  val host = if (":" in url.host) {
-    "[${url.host}]"
+fun HttpUrl.toHostHeader(includeDefaultPort: Boolean = false): String {
+  val host = if (":" in host) {
+    "[$host]"
   } else {
-    url.host
+    host
   }
-  return if (includeDefaultPort || url.port != HttpUrl.defaultPort(url.scheme)) {
-    "$host:${url.port}"
+  return if (includeDefaultPort || port != HttpUrl.defaultPort(scheme)) {
+    "$host:$port"
   } else {
     host
   }
