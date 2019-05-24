@@ -37,24 +37,22 @@ import java.net.HttpURLConnection.HTTP_UNAUTHORIZED
  * [ResponseBody] for an explanation and examples.
  */
 class Response internal constructor(
-  internal val request: Request,
-  internal val protocol: Protocol,
-  internal val message: String,
-  builder: Builder
+  @get:JvmName("request") val request: Request,
+  @get:JvmName("protocol") val protocol: Protocol,
+  @get:JvmName("message") val message: String,
+  @get:JvmName("code") val code: Int,
+  @get:JvmName("handshake") val handshake: Handshake?,
+  @get:JvmName("headers") val headers: Headers,
+  @get:JvmName("body") val body: ResponseBody?,
+  @get:JvmName("networkResponse") val networkResponse: Response?,
+  @get:JvmName("cacheResponse") val cacheResponse: Response?,
+  @get:JvmName("priorResponse") val priorResponse: Response?,
+  @get:JvmName("sentRequestAtMillis") val sentRequestAtMillis: Long,
+  @get:JvmName("receivedResponseAtMillis") val receivedResponseAtMillis: Long,
+  @get:JvmName("exchange") val exchange: Exchange?
 ) : Closeable {
-  internal val code: Int = builder.code
-  internal val handshake: Handshake? = builder.handshake
-  internal val headers: Headers = builder.headers.build()
-  internal val body: ResponseBody? = builder.body
-  internal val networkResponse: Response? = builder.networkResponse
-  internal val cacheResponse: Response? = builder.cacheResponse
-  internal val priorResponse: Response? = builder.priorResponse
-  internal val sentRequestAtMillis: Long = builder.sentRequestAtMillis
-  internal val receivedResponseAtMillis: Long = builder.receivedResponseAtMillis
-  internal val exchange: Exchange? = builder.exchange
 
-  @Volatile
-  private var cacheControl: CacheControl? = null // Lazily initialized.
+  private var lazyCacheControl: CacheControl? = null
 
   /**
    * The wire-level request that initiated this HTTP response. This is not necessarily the same
@@ -65,12 +63,27 @@ class Response internal constructor(
    * * It may be the request generated in response to an HTTP redirect or authentication
    *   challenge. In this case the request URL may be different than the initial request URL.
    */
+  @JvmName("-deprecated_request")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "request"),
+      level = DeprecationLevel.WARNING)
   fun request(): Request = request
 
   /** Returns the HTTP protocol, such as [Protocol.HTTP_1_1] or [Protocol.HTTP_1_0]. */
+  @JvmName("-deprecated_protocol")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "protocol"),
+      level = DeprecationLevel.WARNING)
   fun protocol(): Protocol = protocol
 
   /** Returns the HTTP status code. */
+  @JvmName("-deprecated_code")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "code"),
+      level = DeprecationLevel.WARNING)
   fun code(): Int = code
 
   /**
@@ -81,12 +94,22 @@ class Response internal constructor(
     get() = code in 200..299
 
   /** Returns the HTTP status message. */
+  @JvmName("-deprecated_message")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "message"),
+      level = DeprecationLevel.WARNING)
   fun message(): String = message
 
   /**
    * Returns the TLS handshake of the connection that carried this response, or null if the
    * response was received without TLS.
    */
+  @JvmName("-deprecated_handshake")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "handshake"),
+      level = DeprecationLevel.WARNING)
   fun handshake(): Handshake? = handshake
 
   fun headers(name: String): List<String> = headers.values(name)
@@ -94,6 +117,11 @@ class Response internal constructor(
   @JvmOverloads
   fun header(name: String, defaultValue: String? = null): String? = headers[name] ?: defaultValue
 
+  @JvmName("-deprecated_headers")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "headers"),
+      level = DeprecationLevel.WARNING)
   fun headers(): Headers = headers
 
   /**
@@ -131,6 +159,11 @@ class Response internal constructor(
    * This always returns null on responses returned from [cacheResponse], [networkResponse],
    * and [priorResponse].
    */
+  @JvmName("-deprecated_body")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "body"),
+      level = DeprecationLevel.WARNING)
   fun body(): ResponseBody? = body
 
   fun newBuilder(): Builder = Builder(this)
@@ -147,6 +180,11 @@ class Response internal constructor(
    * the network, such as when the response is fully cached. The body of the returned response
    * should not be read.
    */
+  @JvmName("-deprecated_networkResponse")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "networkResponse"),
+      level = DeprecationLevel.WARNING)
   fun networkResponse(): Response? = networkResponse
 
   /**
@@ -154,6 +192,11 @@ class Response internal constructor(
    * the cache. For conditional get requests the cache response and network response may both be
    * non-null. The body of the returned response should not be read.
    */
+  @JvmName("-deprecated_cacheResponse")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "cacheResponse"),
+      level = DeprecationLevel.WARNING)
   fun cacheResponse(): Response? = cacheResponse
 
   /**
@@ -162,6 +205,11 @@ class Response internal constructor(
    * returned response should not be read because it has already been consumed by the redirecting
    * client.
    */
+  @JvmName("-deprecated_priorResponse")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "priorResponse"),
+      level = DeprecationLevel.WARNING)
   fun priorResponse(): Response? = priorResponse
 
   /**
@@ -176,7 +224,7 @@ class Response internal constructor(
    * auth param, this is up to the caller that interprets these challenges.
    */
   fun challenges(): List<Challenge> {
-    return headers().parseChallenges(
+    return headers.parseChallenges(
         when (code) {
           HTTP_UNAUTHORIZED -> "WWW-Authenticate"
           HTTP_PROXY_AUTH -> "Proxy-Authenticate"
@@ -189,15 +237,33 @@ class Response internal constructor(
    * Returns the cache control directives for this response. This is never null, even if this
    * response contains no `Cache-Control` header.
    */
-  fun cacheControl(): CacheControl = cacheControl ?: CacheControl.parse(headers).also {
-    cacheControl = it
-  }
+  @get:JvmName("cacheControl") val cacheControl: CacheControl
+    get() {
+      var result = lazyCacheControl
+      if (result == null) {
+        result = CacheControl.parse(headers)
+        lazyCacheControl = result
+      }
+      return result
+    }
+
+  @JvmName("-deprecated_cacheControl")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "cacheControl"),
+      level = DeprecationLevel.WARNING)
+  fun cacheControl(): CacheControl = cacheControl
 
   /**
    * Returns a [timestamp][System.currentTimeMillis] taken immediately before OkHttp
    * transmitted the initiating request over the network. If this response is being served from the
    * cache then this is the timestamp of the original request.
    */
+  @JvmName("-deprecated_sentRequestAtMillis")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "sentRequestAtMillis"),
+      level = DeprecationLevel.WARNING)
   fun sentRequestAtMillis(): Long = sentRequestAtMillis
 
   /**
@@ -205,6 +271,11 @@ class Response internal constructor(
    * received this response's headers from the network. If this response is being served from the
    * cache then this is the timestamp of the original response.
    */
+  @JvmName("-deprecated_receivedResponseAtMillis")
+  @Deprecated(
+      message = "moved to val",
+      replaceWith = ReplaceWith(expression = "receivedResponseAtMillis"),
+      level = DeprecationLevel.WARNING)
   fun receivedResponseAtMillis(): Long = receivedResponseAtMillis
 
   /**
@@ -353,7 +424,17 @@ class Response internal constructor(
           checkNotNull(request) { "request == null" },
           checkNotNull(protocol) { "protocol == null" },
           checkNotNull(message) { "message == null" },
-          this)
+          code,
+          handshake,
+          headers.build(),
+          body,
+          networkResponse,
+          cacheResponse,
+          priorResponse,
+          sentRequestAtMillis,
+          receivedResponseAtMillis,
+          exchange
+      )
     }
   }
 }
