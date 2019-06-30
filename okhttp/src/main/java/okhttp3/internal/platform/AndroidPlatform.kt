@@ -26,7 +26,6 @@ import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.nio.charset.StandardCharsets.UTF_8
 import java.security.cert.Certificate
 import java.security.cert.TrustAnchor
 import java.security.cert.X509Certificate
@@ -36,14 +35,11 @@ import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
 
 /** Android 5+. */
-class AndroidPlatform(
-  private val sslParametersClass: Class<*>,
-  private val sslSocketClass: Class<*>,
-  private val setUseSessionTickets: Method,
-  private val setHostname: Method,
-  private val getAlpnSelectedProtocol: Method,
-  private val setAlpnProtocols: Method
-) : Platform() {
+class AndroidPlatform : Platform() {
+  private val socketAdapters =
+      listOf(AndroidSocketAdapter.Standard, AndroidSocketAdapter.Gms,
+          ConscryptSocketAdapter).filter(AndroidSocketAdapter::isSupported)
+
   private val closeGuard = CloseGuard.get()
 
   @Throws(IOException::class)
@@ -65,87 +61,26 @@ class AndroidPlatform(
     }
   }
 
-  override fun trustManager(sslSocketFactory: SSLSocketFactory): X509TrustManager? {
-    var context: Any? =
-        readFieldOrNull(sslSocketFactory, sslParametersClass, "sslParameters")
-    if (context == null) {
-      // If that didn't work, try the Google Play Services SSL provider before giving up. This
-      // must be loaded by the SSLSocketFactory's class loader.
-      try {
-        val gmsSslParametersClass = Class.forName(
-            "com.google.android.gms.org.conscrypt.SSLParametersImpl", false,
-            sslSocketFactory.javaClass.classLoader)
-        context = readFieldOrNull(sslSocketFactory, gmsSslParametersClass,
-            "sslParameters")
-      } catch (e: ClassNotFoundException) {
-        return super.trustManager(sslSocketFactory)
-      }
-    }
-
-    val x509TrustManager = readFieldOrNull(
-        context!!, X509TrustManager::class.java, "x509TrustManager")
-    return x509TrustManager ?: readFieldOrNull(context, X509TrustManager::class.java,
-        "trustManager")
-  }
+  override fun trustManager(sslSocketFactory: SSLSocketFactory): X509TrustManager? =
+      socketAdapters.find { it.matchesSocketFactory(sslSocketFactory) }
+          ?.trustManager(sslSocketFactory)
 
   override fun configureTlsExtensions(
     sslSocket: SSLSocket,
     hostname: String?,
     protocols: List<Protocol>
   ) {
-    if (!sslSocketClass.isInstance(sslSocket)) {
-      return // No TLS extensions if the socket class is custom.
-    }
-    try {
-      // Enable SNI and session tickets.
-      if (hostname != null) {
-        setUseSessionTickets.invoke(sslSocket, true)
-        // This is SSLParameters.setServerNames() in API 24+.
-        setHostname.invoke(sslSocket, hostname)
-      }
-
-      // Enable ALPN.
-      setAlpnProtocols.invoke(sslSocket, concatLengthPrefixed(protocols))
-    } catch (e: IllegalAccessException) {
-      throw AssertionError(e)
-    } catch (e: InvocationTargetException) {
-      throw AssertionError(e)
-    }
+    // No TLS extensions if the socket class is custom.
+    socketAdapters.find { it.matchesSocket(sslSocket) }
+        ?.configureTlsExtensions(sslSocket, hostname, protocols)
   }
 
-  override fun getSelectedProtocol(socket: SSLSocket): String? {
-    return if (sslSocketClass.isInstance(socket))
-      try {
-        val alpnResult = getAlpnSelectedProtocol.invoke(socket) as ByteArray?
-        if (alpnResult != null) String(alpnResult, UTF_8) else null
-      } catch (e: IllegalAccessException) {
-        throw AssertionError(e)
-      } catch (e: InvocationTargetException) {
-        throw AssertionError(e)
-      }
-    else {
-      null // No TLS extensions if the socket class is custom.
-    }
-  }
+  override fun getSelectedProtocol(sslSocket: SSLSocket) =
+      // No TLS extensions if the socket class is custom.
+      socketAdapters.find { it.matchesSocket(sslSocket) }?.getSelectedProtocol(sslSocket)
 
   override fun log(level: Int, message: String, t: Throwable?) {
-    var logMessage = message
-    val logLevel = if (level == WARN) Log.WARN else Log.DEBUG
-    if (t != null) logMessage = logMessage + '\n'.toString() + Log.getStackTraceString(t)
-
-    // Split by line, then ensure each line can fit into Log's maximum length.
-    var i = 0
-    val length = logMessage.length
-    while (i < length) {
-      var newline = logMessage.indexOf('\n', i)
-      newline = if (newline != -1) newline else length
-      do {
-        val end = minOf(newline, i + MAX_LOG_LENGTH)
-        Log.println(logLevel, "OkHttp", logMessage.substring(i, end))
-        i = end
-      } while (i < newline)
-      i++
-    }
+    Companion.log(level, message, t)
   }
 
   override fun getStackTraceForCloseable(closer: String): Any? = closeGuard.createAndOpen(closer)
@@ -318,7 +253,6 @@ class AndroidPlatform(
   /**
    * A trust manager for Android applications that customize the trust manager.
    *
-   *
    * This class exploits knowledge of Android implementation details. This class is potentially
    * much faster to initialize than [BasicTrustRootIndex] because it doesn't need to load and
    * index trusted CA certificates.
@@ -327,7 +261,6 @@ class AndroidPlatform(
     private val trustManager: X509TrustManager,
     private val findByIssuerAndSignatureMethod: Method
   ) : TrustRootIndex {
-
     override fun findByIssuerAndSignature(cert: X509Certificate): X509Certificate? {
       return try {
         val trustAnchor = findByIssuerAndSignatureMethod.invoke(
@@ -344,30 +277,43 @@ class AndroidPlatform(
   companion object {
     private const val MAX_LOG_LENGTH = 4000
 
-    fun buildIfSupported(): Platform? {
-      // Attempt to find Android 5+ APIs.
-      val sslParametersClass: Class<*>
-      val sslSocketClass: Class<*>
+    val isSupported: Boolean by lazy {
       try {
-        sslParametersClass = Class.forName("com.android.org.conscrypt.SSLParametersImpl")
-        sslSocketClass = Class.forName("com.android.org.conscrypt.OpenSSLSocketImpl")
-      } catch (_: ClassNotFoundException) {
-        return null // Not an Android runtime.
-      }
+        // Trigger an early exception over a fatal error, prefer a RuntimeException over Error.
+        Class.forName("com.android.org.conscrypt.OpenSSLSocketImpl")
 
-      if (Build.VERSION.SDK_INT >= 21) {
-        try {
-          val setUseSessionTickets = sslSocketClass.getDeclaredMethod(
-              "setUseSessionTickets", Boolean::class.javaPrimitiveType)
-          val setHostname = sslSocketClass.getMethod("setHostname", String::class.java)
-          val getAlpnSelectedProtocol = sslSocketClass.getMethod("getAlpnSelectedProtocol")
-          val setAlpnProtocols = sslSocketClass.getMethod("setAlpnProtocols", ByteArray::class.java)
-          return AndroidPlatform(sslParametersClass, sslSocketClass, setUseSessionTickets,
-              setHostname, getAlpnSelectedProtocol, setAlpnProtocols)
-        } catch (_: NoSuchMethodException) {
+        // Fail Fast
+        if (Build.VERSION.SDK_INT < 21) {
+          throw IllegalStateException(
+              "Expected Android API level 21+ but was ${Build.VERSION.SDK_INT}")
         }
+
+        true
+      } catch (e: ClassNotFoundException) {
+        false
       }
-      throw IllegalStateException("Expected Android API level 21+ but was ${Build.VERSION.SDK_INT}")
+    }
+
+    fun buildIfSupported(): Platform? = if (isSupported) AndroidPlatform() else null
+
+    fun log(level: Int, message: String, t: Throwable?) {
+      var logMessage = message
+      val logLevel = if (level == WARN) Log.WARN else Log.DEBUG
+      if (t != null) logMessage = logMessage + '\n'.toString() + Log.getStackTraceString(t)
+
+      // Split by line, then ensure each line can fit into Log's maximum length.
+      var i = 0
+      val length = logMessage.length
+      while (i < length) {
+        var newline = logMessage.indexOf('\n', i)
+        newline = if (newline != -1) newline else length
+        do {
+          val end = minOf(newline, i + MAX_LOG_LENGTH)
+          Log.println(logLevel, "OkHttp", logMessage.substring(i, end))
+          i = end
+        } while (i < newline)
+        i++
+      }
     }
   }
 }
