@@ -183,6 +183,47 @@ jobs:
       - runtests:
           platform: conscrypt
 
+  docs:
+    machine:
+      image: circleci/classic:latest
+    parallelism: 1
+    steps:
+      - checkout # check out source code to working directory
+      - run: |
+          sudo mkdir -p /usr/local/bin
+          sudo chown -R circleci:circleci /usr/local/bin
+      - run: |
+          sudo mkdir -p /usr/local/lib/python3.6/site-packages
+          sudo chown -R circleci:circleci /usr/local/lib/python3.6/site-packages
+      - restore_cache:
+          key: pipdeps-{{ .Branch }}
+      - run: sudo pip install mkdocs mkdocs-material
+      - save_cache:
+          key: pipdeps-{{ .Branch }}
+          paths:
+            - "/usr/local/bin"
+            - "/usr/local/lib/python3.6/site-packages"
+      - run: |
+          ./gradlew \
+            :mockwebserver:dokka \
+            :okhttp-dnsoverhttps:dokka \
+            :okhttp-logging-interceptor:dokka \
+            :okhttp-sse:dokka \
+            :okhttp-tls:dokka \
+            :okhttp-urlconnection:dokka \
+            :okhttp:dokka
+      - run: |
+          cat README.md | grep -v 'project website' > docs/index.md
+          cp CHANGELOG.md docs/changelog.md
+          cp CONTRIBUTING.md docs/contributing.md
+      - run: |
+          git remote set-url origin https://github.com/square/okhttp.git
+          git config --global user.email "circleci@squareup.com"
+          git config --global user.name "CircleCI"
+          git cherry-pick bb229b9dcc9a21a73edbf8d936bea88f52e0a3ff
+          git cherry-pick c695732f1d4aea103b826876c077fbfea630e244
+      - run: mkdocs build
+
 workflows:
   version: 2
   commit:
@@ -218,6 +259,7 @@ workflows:
           filters:
             branches:
               only: master
+      - docs
   nightly:
     triggers:
       - schedule:
@@ -245,3 +287,4 @@ workflows:
       - testconscrypt:
           requires:
             - compile
+      - docs
