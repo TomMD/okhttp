@@ -245,18 +245,33 @@ class CertificatePinner internal constructor(
     val pattern: String,
     /** The canonical hostname, i.e. `EXAMPLE.com` becomes `example.com`. */
     private val canonicalHostname: String,
+    /** If true, all subdomains of the domain are included (including sub-subdomains etc). If true, wildcard matching is not applied. */
+    val includeSubdomains: Boolean,
     /** Either `sha1/` or `sha256/`. */
     val hashAlgorithm: String,
     /** The hash of the pinned certificate using [hashAlgorithm]. */
     val hash: ByteString
   ) {
     fun matches(hostname: String): Boolean {
-      if (pattern.startsWith(WILDCARD)) {
+      if (includeSubdomains) {
+        val patternSegments = pattern.split('.').reversed()
+        val hostnameSegments = hostname.split('.').reversed()
+        if (patternSegments.size > hostnameSegments.size) {
+          return false
+        }
+        for (i in patternSegments.indices) {
+          if (patternSegments[i] != hostnameSegments[i]) {
+            return false
+          }
+        }
+        return true
+      } else if (pattern.startsWith(WILDCARD)) {
         val firstDot = hostname.indexOf('.')
         return hostname.length - firstDot - 1 == canonicalHostname.length &&
-            hostname.startsWith(canonicalHostname, startIndex = firstDot + 1)
+                  hostname.startsWith(canonicalHostname, startIndex = firstDot + 1)
+      } else {
+        return hostname == canonicalHostname
       }
-      return hostname == canonicalHostname
     }
 
     override fun toString(): String = hashAlgorithm + hash.base64()
@@ -270,13 +285,26 @@ class CertificatePinner internal constructor(
      * Pins certificates for `pattern`.
      *
      * @param pattern lower-case host name or wildcard pattern such as `*.example.com`.
+     * @param includeSubdomains Set this to true to include all subdomains of the given domain. If
+     * true, wildcard matching is turned off.
+     * @param pins SHA-256 or SHA-1 hashes. Each pin is a hash of a certificate's Subject Public Key
+     * Info, base64-encoded and prefixed with either `sha256/` or `sha1/`.
+     */
+    fun add(pattern: String, includeSubdomains: Boolean, vararg pins: String) = apply {
+      for (pin in pins) {
+        this.pins.add(newPin(pattern, includeSubdomains, pin))
+      }
+    }
+
+    /**
+     * Pins certificates for `pattern`.
+     *
+     * @param pattern lower-case host name or wildcard pattern such as `*.example.com`.
      * @param pins SHA-256 or SHA-1 hashes. Each pin is a hash of a certificate's Subject Public Key
      * Info, base64-encoded and prefixed with either `sha256/` or `sha1/`.
      */
     fun add(pattern: String, vararg pins: String) = apply {
-      for (pin in pins) {
-        this.pins.add(newPin(pattern, pin))
-      }
+      add(pattern, false, *pins)
     }
 
     fun build(): CertificatePinner = CertificatePinner(pins.toSet(), null)
@@ -307,6 +335,9 @@ class CertificatePinner internal constructor(
         publicKey.encoded.toByteString().sha256()
 
     internal fun newPin(pattern: String, pin: String): Pin {
+      return newPin(pattern, false, pin)
+    }
+    internal fun newPin(pattern: String, includeSubdomains: Boolean, pin: String): Pin {
       val canonicalHostname = when {
         pattern.startsWith(WILDCARD) -> {
           "http://${pattern.substring(WILDCARD.length)}".toHttpUrl().host
@@ -319,11 +350,11 @@ class CertificatePinner internal constructor(
       return when {
         pin.startsWith("sha1/") -> {
           val hash = pin.substring("sha1/".length).decodeBase64()!!
-          Pin(pattern, canonicalHostname, "sha1/", hash)
+          Pin(pattern, canonicalHostname, includeSubdomains, "sha1/", hash)
         }
         pin.startsWith("sha256/") -> {
           val hash = pin.substring("sha256/".length).decodeBase64()!!
-          Pin(pattern, canonicalHostname, "sha256/", hash)
+          Pin(pattern, canonicalHostname, includeSubdomains, "sha256/", hash)
         }
         else -> throw IllegalArgumentException("pins must start with 'sha256/' or 'sha1/': $pin")
       }
