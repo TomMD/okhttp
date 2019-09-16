@@ -15,8 +15,8 @@
  */
 package okhttp3
 
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.internal.tls.CertificateChainCleaner
+import okhttp3.internal.toCanonicalHost
 import okio.ByteString
 import okio.ByteString.Companion.decodeBase64
 import okio.ByteString.Companion.toByteString
@@ -90,13 +90,15 @@ import javax.net.ssl.SSLPeerUnverifiedException
  *
  * Wildcard pattern rules:
  *
- *  1. Asterisk `*` is only permitted in the left-most domain name label and must be the only
- *     character in that label (i.e., must match the whole left-most label). For example,
- *     `*.example.com` is permitted, while `*a.example.com`, `a*.example.com`, `a*b.example.com`,
- *     `a.*.example.com` are not permitted.
+ *  1. Asterisk `*` and double asterisk `**` are only permitted in the left-most domain name label
+ *     and must be the only text in that label (i.e., must match the whole left-most label). For
+ *     example, `*.example.com` is permitted, while `*a.example.com`, `a*.example.com`,
+ *     `a*b.example.com`, `a.*.example.com` are not permitted.
  *  2. Asterisk `*` cannot match across domain name labels. For example, `*.example.com` matches
- *     `test.example.com` but does not match `sub.test.example.com`.
- *  3. Wildcard patterns for single-label domain names are not permitted.
+ *     `test.example.com` but does not match `sub.test.example.com` or `example.com`.
+ *  3. Double asterisk `**` matches across zero or more domain name labels. For example,
+ *     `**.example.com` matches `example.com`, `foo.example.com`, and `foo.bar.example.com`.
+ *  4. Wildcard patterns for single-label domain names are not permitted.
  *
  * If hostname pinned directly and via wildcard pattern, both direct and wildcard pins will be used.
  * For example: `*.example.com` pinned with `pin1` and `a.example.com` pinned with `pin2`, to check
@@ -241,22 +243,22 @@ class CertificatePinner internal constructor(
   }
 
   internal data class Pin(
-    /** A hostname like `example.com` or a pattern like `*.example.com`. */
-    val pattern: String,
-    /** The canonical hostname, i.e. `EXAMPLE.com` becomes `example.com`. */
-    private val canonicalHostname: String,
+    /** A hostname like `example.com` or a pattern like `*.example.com` (canonical form). */
+    private val pattern: String,
     /** Either `sha1/` or `sha256/`. */
     val hashAlgorithm: String,
     /** The hash of the pinned certificate using [hashAlgorithm]. */
     val hash: ByteString
   ) {
+
     fun matches(hostname: String): Boolean {
-      if (pattern.startsWith(WILDCARD)) {
-        val firstDot = hostname.indexOf('.')
-        return hostname.length - firstDot - 1 == canonicalHostname.length &&
-            hostname.startsWith(canonicalHostname, startIndex = firstDot + 1)
+      val ending by lazy { pattern.substringAfter(".") }
+      return when {
+        pattern.startsWith("**.") -> hostname.endsWith(ending) &&
+            (hostname.length == ending.length || hostname[hostname.length - ending.length - 1] == '.')
+        pattern.startsWith("*.") -> hostname.substringAfter('.') == ending
+        else -> hostname == pattern
       }
-      return hostname == canonicalHostname
     }
 
     override fun toString(): String = hashAlgorithm + hash.base64()
@@ -283,8 +285,6 @@ class CertificatePinner internal constructor(
   }
 
   companion object {
-    internal const val WILDCARD = "*."
-
     @JvmField
     val DEFAULT = Builder().build()
 
@@ -307,23 +307,18 @@ class CertificatePinner internal constructor(
         publicKey.encoded.toByteString().sha256()
 
     internal fun newPin(pattern: String, pin: String): Pin {
-      val canonicalHostname = when {
-        pattern.startsWith(WILDCARD) -> {
-          "http://${pattern.substring(WILDCARD.length)}".toHttpUrl().host
-        }
-        else -> {
-          "http://$pattern".toHttpUrl().host
-        }
-      }
+      require(!pattern.endsWith("*")) { "Invalid pattern: TLD cannot be a wildcard" }
+      val canonicalPattern =
+          pattern.toCanonicalHost() ?: throw IllegalArgumentException("Invalid pattern")
 
       return when {
         pin.startsWith("sha1/") -> {
           val hash = pin.substring("sha1/".length).decodeBase64()!!
-          Pin(pattern, canonicalHostname, "sha1/", hash)
+          Pin(canonicalPattern, "sha1/", hash)
         }
         pin.startsWith("sha256/") -> {
           val hash = pin.substring("sha256/".length).decodeBase64()!!
-          Pin(pattern, canonicalHostname, "sha256/", hash)
+          Pin(canonicalPattern, "sha256/", hash)
         }
         else -> throw IllegalArgumentException("pins must start with 'sha256/' or 'sha1/': $pin")
       }
