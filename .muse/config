@@ -1,1 +1,1 @@
-verifiers = [ "errorprone" ]
+tools = [ "errorprone" ]
