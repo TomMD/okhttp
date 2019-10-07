@@ -1,1 +1,2 @@
+build = "gradlew assemble"
 tools = [ "errorprone" ]
