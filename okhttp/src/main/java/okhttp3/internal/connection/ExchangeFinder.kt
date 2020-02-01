@@ -176,8 +176,6 @@ class ExchangeFinder(
         } else if (nextRouteToTry != null) {
           selectedRoute = nextRouteToTry
           nextRouteToTry = null
-        } else if (retryCurrentRoute()) {
-          selectedRoute = transmitter.connection!!.route()
         }
       }
     }
