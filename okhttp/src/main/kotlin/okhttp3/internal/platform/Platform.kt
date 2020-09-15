@@ -19,6 +19,7 @@ package okhttp3.internal.platform
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.Security
 import java.util.logging.Level
@@ -26,10 +27,12 @@ import java.util.logging.Logger
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.TrustManager
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
+import okhttp3.internal.platform.android.AndroidLog
 import okhttp3.internal.readFieldOrNull
 import okhttp3.internal.tls.BasicCertificateChainCleaner
 import okhttp3.internal.tls.BasicTrustRootIndex
@@ -82,7 +85,7 @@ open class Platform {
     return trustManagers[0] as X509TrustManager
   }
 
-  protected open fun trustManager(sslSocketFactory: SSLSocketFactory): X509TrustManager? {
+  open fun trustManager(sslSocketFactory: SSLSocketFactory): X509TrustManager? {
     return try {
       // Attempt to get the trust manager from an OpenJDK socket factory. We attempt this on all
       // platforms in order to support Robolectric, which mixes classes from both Android and the
@@ -148,20 +151,17 @@ open class Platform {
   open fun buildCertificateChainCleaner(trustManager: X509TrustManager): CertificateChainCleaner =
       BasicCertificateChainCleaner(buildTrustRootIndex(trustManager))
 
-  fun buildCertificateChainCleaner(sslSocketFactory: SSLSocketFactory): CertificateChainCleaner {
-    val trustManager = trustManager(sslSocketFactory) ?: throw IllegalStateException(
-        "Unable to extract the trust manager on ${get()}, " +
-            "sslSocketFactory is ${sslSocketFactory.javaClass}")
-    return buildCertificateChainCleaner(trustManager)
-  }
-
   open fun buildTrustRootIndex(trustManager: X509TrustManager): TrustRootIndex =
       BasicTrustRootIndex(*trustManager.acceptedIssuers)
 
-  open fun configureSslSocketFactory(socketFactory: SSLSocketFactory) {
-  }
-
-  open fun configureTrustManager(trustManager: X509TrustManager?) {
+  open fun newSslSocketFactory(trustManager: X509TrustManager): SSLSocketFactory {
+    try {
+      return newSSLContext().apply {
+        init(null, arrayOf<TrustManager>(trustManager), null)
+      }.socketFactory
+    } catch (e: GeneralSecurityException) {
+      throw AssertionError("No System TLS: $e", e) // The system has no TLS. Just give up.
+    }
   }
 
   override fun toString(): String = javaClass.simpleName
@@ -184,6 +184,11 @@ open class Platform {
     fun alpnProtocolNames(protocols: List<Protocol>) =
         protocols.filter { it != Protocol.HTTP_1_0 }.map { it.toString() }
 
+    // This explicit check avoids activating in Android Studio with Android specific classes
+    // available when running plugins inside the IDE.
+    val isAndroid: Boolean
+        get() = "Dalvik" == System.getProperty("java.vm.name")
+
     private val isConscryptPreferred: Boolean
       get() {
         val preferredProvider = Security.getProviders()[0].name
@@ -203,19 +208,18 @@ open class Platform {
       }
 
     /** Attempt to match the host runtime to a capable Platform implementation. */
-    private fun findPlatform(): Platform {
-      val android10 = Android10Platform.buildIfSupported()
+    private fun findPlatform(): Platform = if (isAndroid) {
+      findAndroidPlatform()
+    } else {
+      findJvmPlatform()
+    }
 
-      if (android10 != null) {
-        return android10
-      }
+    private fun findAndroidPlatform(): Platform {
+      AndroidLog.enable()
+      return Android10Platform.buildIfSupported() ?: AndroidPlatform.buildIfSupported()!!
+    }
 
-      val android = AndroidPlatform.buildIfSupported()
-
-      if (android != null) {
-        return android
-      }
-
+    private fun findJvmPlatform(): Platform {
       if (isConscryptPreferred) {
         val conscrypt = ConscryptPlatform.buildIfSupported()
 
@@ -240,16 +244,21 @@ open class Platform {
         }
       }
 
+      // An Oracle JDK 9 like OpenJDK, or JDK 8 251+.
       val jdk9 = Jdk9Platform.buildIfSupported()
 
       if (jdk9 != null) {
         return jdk9
       }
 
-      // An Oracle JDK 8 like OpenJDK.
+      // An Oracle JDK 8 like OpenJDK, pre 251.
       val jdkWithJettyBoot = Jdk8WithJettyBootPlatform.buildIfSupported()
 
-      return jdkWithJettyBoot ?: Platform()
+      if (jdkWithJettyBoot != null) {
+        return jdkWithJettyBoot
+      }
+
+      return Platform()
     }
 
     /**

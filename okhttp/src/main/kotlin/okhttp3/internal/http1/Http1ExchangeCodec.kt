@@ -70,7 +70,7 @@ class Http1ExchangeCodec(
   private val sink: BufferedSink
 ) : ExchangeCodec {
   private var state = STATE_IDLE
-  private var headerLimit = HEADER_LIMIT.toLong()
+  private val headersReader = HeadersReader(source)
 
   private val Response.isChunked: Boolean
       get() = "chunked".equals(header("Transfer-Encoding"), ignoreCase = true)
@@ -175,13 +175,13 @@ class Http1ExchangeCodec(
     }
 
     try {
-      val statusLine = StatusLine.parse(readHeaderLine())
+      val statusLine = StatusLine.parse(headersReader.readLine())
 
       val responseBuilder = Response.Builder()
           .protocol(statusLine.protocol)
           .code(statusLine.code)
           .message(statusLine.message)
-          .headers(readHeaders())
+          .headers(headersReader.readHeaders())
 
       return when {
         expectContinue && statusLine.code == HTTP_CONTINUE -> {
@@ -201,24 +201,6 @@ class Http1ExchangeCodec(
       val address = connection.route().address.url.redact()
       throw IOException("unexpected end of stream on $address", e)
     }
-  }
-
-  private fun readHeaderLine(): String {
-    val line = source.readUtf8LineStrict(headerLimit)
-    headerLimit -= line.length.toLong()
-    return line
-  }
-
-  /** Reads headers or trailers. */
-  private fun readHeaders(): Headers {
-    val headers = Headers.Builder()
-    // parse the result headers until the first blank line
-    var line = readHeaderLine()
-    while (line.isNotEmpty()) {
-      headers.addLenient(line)
-      line = readHeaderLine()
-    }
-    return headers.build()
   }
 
   private fun newChunkedSink(): Sink {
@@ -358,7 +340,7 @@ class Http1ExchangeCodec(
      * Closes the cache entry and makes the socket available for reuse. This should be invoked when
      * the end of the body has been reached.
      */
-    internal fun responseBodyComplete() {
+    fun responseBodyComplete() {
       if (state == STATE_CLOSED) return
       if (state != STATE_READING_RESPONSE_BODY) throw IllegalStateException("state: $state")
 
@@ -369,7 +351,7 @@ class Http1ExchangeCodec(
   }
 
   /** An HTTP body with a fixed length specified in advance. */
-  private inner class FixedLengthSource internal constructor(private var bytesRemaining: Long) :
+  private inner class FixedLengthSource(private var bytesRemaining: Long) :
       AbstractSource() {
 
     init {
@@ -412,7 +394,7 @@ class Http1ExchangeCodec(
   }
 
   /** An HTTP body with alternating chunk sizes and chunk bodies. */
-  private inner class ChunkedSource internal constructor(private val url: HttpUrl) :
+  private inner class ChunkedSource(private val url: HttpUrl) :
       AbstractSource() {
     private var bytesRemainingInChunk = NO_CHUNK_YET
     private var hasMoreChunks = true
@@ -456,7 +438,7 @@ class Http1ExchangeCodec(
 
       if (bytesRemainingInChunk == 0L) {
         hasMoreChunks = false
-        trailers = readHeaders()
+        trailers = headersReader.readHeaders()
         client!!.cookieJar.receiveHeaders(url, trailers!!)
         responseBodyComplete()
       }
@@ -510,6 +492,5 @@ class Http1ExchangeCodec(
     private const val STATE_OPEN_RESPONSE_BODY = 4
     private const val STATE_READING_RESPONSE_BODY = 5
     private const val STATE_CLOSED = 6
-    private const val HEADER_LIMIT = 256 * 1024
   }
 }

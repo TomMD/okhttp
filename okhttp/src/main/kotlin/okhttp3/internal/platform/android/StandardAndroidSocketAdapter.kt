@@ -23,6 +23,9 @@ import okhttp3.internal.readFieldOrNull
 
 /**
  * Base Android reflection based SocketAdapter for the built in Android SSLSocket.
+ *
+ * It's assumed to always be present with known class names on Android devices, so we build
+ * optimistically via [buildIfSupported].  But it also doesn't assume a compile time API.
  */
 class StandardAndroidSocketAdapter(
   sslSocketClass: Class<in SSLSocket>,
@@ -55,7 +58,7 @@ class StandardAndroidSocketAdapter(
 
         StandardAndroidSocketAdapter(sslSocketClass, sslSocketFactoryClass, paramsClass)
       } catch (e: Exception) {
-        androidLog(Platform.WARN, "unable to load android socket classes", e)
+        Platform.get().log(level = Platform.WARN, message = "unable to load android socket classes", t = e)
         null
       }
     }

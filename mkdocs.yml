@@ -35,12 +35,14 @@ markdown_extensions:
   - pymdownx.smartsymbols
   - pymdownx.superfences
   - pymdownx.tilde
+  - pymdownx.tabbed
   - tables
 
 nav:
   - 'Overview': index.md
   - 'Stack Overflow ⏏': https://stackoverflow.com/questions/tagged/okhttp?sort=active
   - 'Calls': calls.md
+  - 'Caching': caching.md
   - 'Connections': connections.md
   - 'Events': events.md
   - 'HTTPS': https.md

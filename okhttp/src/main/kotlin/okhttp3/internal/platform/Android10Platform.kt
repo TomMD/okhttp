@@ -23,13 +23,12 @@ import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
 import okhttp3.Protocol
 import okhttp3.internal.SuppressSignatureCheck
-import okhttp3.internal.platform.AndroidPlatform.Companion.isAndroid
-import okhttp3.internal.platform.android.Android10CertificateChainCleaner
 import okhttp3.internal.platform.android.Android10SocketAdapter
+import okhttp3.internal.platform.android.AndroidCertificateChainCleaner
+import okhttp3.internal.platform.android.AndroidSocketAdapter
 import okhttp3.internal.platform.android.BouncyCastleSocketAdapter
 import okhttp3.internal.platform.android.ConscryptSocketAdapter
 import okhttp3.internal.platform.android.DeferredSocketAdapter
-import okhttp3.internal.platform.android.androidLog
 import okhttp3.internal.tls.CertificateChainCleaner
 
 /** Android 29+. */
@@ -37,9 +36,10 @@ import okhttp3.internal.tls.CertificateChainCleaner
 class Android10Platform : Platform() {
   private val socketAdapters = listOfNotNull(
       Android10SocketAdapter.buildIfSupported(),
-      ConscryptSocketAdapter.buildIfSupported(),
-      DeferredSocketAdapter("com.google.android.gms.org.conscrypt"),
-      BouncyCastleSocketAdapter.buildIfSupported()
+      DeferredSocketAdapter(AndroidSocketAdapter.playProviderFactory),
+      // Delay and Defer any initialisation of Conscrypt and BouncyCastle
+      DeferredSocketAdapter(ConscryptSocketAdapter.factory),
+      DeferredSocketAdapter(BouncyCastleSocketAdapter.factory)
   ).filter { it.isSupported() }
 
   override fun trustManager(sslSocketFactory: SSLSocketFactory): X509TrustManager? =
@@ -56,16 +56,12 @@ class Android10Platform : Platform() {
       // No TLS extensions if the socket class is custom.
       socketAdapters.find { it.matchesSocket(sslSocket) }?.getSelectedProtocol(sslSocket)
 
-  override fun log(message: String, level: Int, t: Throwable?) {
-    androidLog(level, message, t)
-  }
-
   @SuppressLint("NewApi")
   override fun isCleartextTrafficPermitted(hostname: String): Boolean =
       NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(hostname)
 
   override fun buildCertificateChainCleaner(trustManager: X509TrustManager): CertificateChainCleaner =
-      Android10CertificateChainCleaner.buildIfSupported(trustManager) ?: super.buildCertificateChainCleaner(trustManager)
+      AndroidCertificateChainCleaner.buildIfSupported(trustManager) ?: super.buildCertificateChainCleaner(trustManager)
 
   companion object {
     val isSupported: Boolean = isAndroid && Build.VERSION.SDK_INT >= 29

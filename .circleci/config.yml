@@ -61,7 +61,7 @@ commands:
 jobs:
   compile:
     docker:
-      - image: circleci/openjdk:11.0.6-jdk-stretch
+      - image: circleci/openjdk:11.0.7-jdk-buster
 
     environment:
       JVM_OPTS: -Xmx1g
@@ -91,7 +91,7 @@ jobs:
 
   checkjdk11:
     docker:
-      - image: circleci/openjdk:11.0.6-jdk-stretch
+      - image: circleci/openjdk:11.0.7-jdk-buster
 
     environment:
       JVM_OPTS: -Xmx1g
@@ -154,6 +154,7 @@ jobs:
 
   testopenjsse:
     docker:
+      # Held back to ensure a JDK 8 is in the image, which is true for stretch but not buster
       - image: circleci/openjdk:11.0.6-jdk-stretch
 
     environment:
@@ -169,7 +170,7 @@ jobs:
 
   testjdk11:
     docker:
-      - image: circleci/openjdk:11.0.6-jdk-stretch
+      - image: circleci/openjdk:11.0.7-jdk-buster
 
     environment:
       JVM_OPTS: -Xmx1g
@@ -212,7 +213,7 @@ jobs:
 
   testjdk14:
     docker:
-      - image: circleci/openjdk:14-ea-34-jdk-buster
+      - image: circleci/openjdk:14.0.1-jdk-buster
 
     environment:
       JVM_OPTS: -Xmx1g
@@ -226,7 +227,7 @@ jobs:
 
   testconscrypt:
     docker:
-      - image: circleci/openjdk:11.0.6-jdk-stretch
+      - image: circleci/openjdk:11.0.7-jdk-buster
 
     environment:
       JVM_OPTS: -Xmx1g
@@ -240,7 +241,7 @@ jobs:
 
   testbouncycastle:
     docker:
-      - image: circleci/openjdk:11.0.6-jdk-stretch
+      - image: circleci/openjdk:11.0.7-jdk-buster
 
     environment:
       JVM_OPTS: -Xmx1g
@@ -254,7 +255,7 @@ jobs:
 
   testcorretto:
     docker:
-      - image: circleci/openjdk:11.0.6-jdk-stretch
+      - image: circleci/openjdk:11.0.7-jdk-buster
 
     environment:
       JVM_OPTS: -Xmx1g
@@ -294,10 +295,6 @@ workflows:
             branches:
               ignore:
                 - gh-pages
-      - testjdk12windows:
-          filters:
-            branches:
-              only: master
       - testjdk13:
           filters:
             branches:
@@ -308,6 +305,7 @@ workflows:
             branches:
               ignore:
                 - gh-pages
+      #- testjdk12windows:
       #- testbouncycastle
       #- testopenjsse
       #- testconscrypt

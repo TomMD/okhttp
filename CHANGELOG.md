@@ -1,6 +1,181 @@
 Change Log
 ==========
 
+## Version 4.9.0
+
+_2020-09-11_
+
+**With this release, `okhttp-tls` no longer depends on Bouncy Castle and doesn't install the
+Bouncy Castle security provider.** If you still need it, you can do it yourself: 
+
+```
+Security.addProvider(BouncyCastleProvider())
+```
+
+You will also need to configure this dependency:
+
+```
+dependencies {
+  implementation "org.bouncycastle:bcprov-jdk15on:1.65"
+}
+```
+
+ *  Upgrade: [Kotlin 1.4.10][kotlin_1_4_10]. We now use Kotlin 1.4.x [functional
+    interfaces][fun_interface] for `Authenticator`, `Interceptor`, and others.
+ *  Upgrade: Build with Conscrypt 2.5.1.
+
+
+## Version 4.8.1
+
+_2020-08-06_
+
+ *  Fix: Don't crash in `HeldCertificate.Builder` when creating certificates on older versions of
+    Android, including Android 6. We were using a feature of `SimpleDateFormat` that wasn't
+    available in those versions!
+
+
+## Version 4.8.0
+
+_2020-07-11_
+
+ *  New: Change `HeldCertificate.Builder` to use its own ASN.1 certificate encoder. This is part
+    of our effort to remove the okhttp-tls module's dependency on Bouncy Castle. We think Bouncy 
+    Castle is great! But it's a large dependency (6.5 MiB) and its security provider feature 
+    impacts VM-wide behavior.
+
+ *  New: Reduce contention for applications that make a very high number of concurrent requests.
+    Previously OkHttp used its connection pool as a lock when making changes to connections and
+    calls. With this change each connection is locked independently.
+    
+ *  Upgrade: [Okio 2.7.0][okio_2_7_0].
+
+    ```kotlin
+    implementation("com.squareup.okio:okio:2.7.0")
+    ```
+
+ *  Fix: Avoid log messages like "Didn't find class org.conscrypt.ConscryptHostnameVerifier" when
+    detecting the TLS capabilities of the host platform.
+    
+ *  Fix: Don't crash in `HttpUrl.topPrivateDomain()` when the hostname is malformed. 
+
+ *  Fix: Don't attempt Brotli decompression if the response body is empty.
+
+
+## Version 4.7.2
+
+_2020-05-20_
+
+ *  Fix: Don't crash inspecting whether the host platform is JVM or Android. With 4.7.0 and 4.7.1 we
+    had a crash `IllegalArgumentException: Not a Conscrypt trust manager` because we depended on
+    initialization order of companion objects.
+
+
+## Version 4.7.1
+
+_2020-05-18_
+
+ *  Fix: Pass the right arguments in the trust manager created for `addInsecureHost()`. Without the
+    fix insecure hosts crash with an `IllegalArgumentException` on Android.
+
+
+## Version 4.7.0
+
+_2020-05-17_
+
+ *  New: `HandshakeCertificates.Builder.addInsecureHost()` makes it easy to turn off security in
+    private development environments that only carry test data. Prefer this over creating an
+    all-trusting `TrustManager` because only hosts on the allowlist are insecure. From
+    [our DevServer sample][dev_server]:
+
+    ```kotlin
+    val clientCertificates = HandshakeCertificates.Builder()
+        .addPlatformTrustedCertificates()
+        .addInsecureHost("localhost")
+        .build()
+
+    val client = OkHttpClient.Builder()
+        .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager)
+        .build()
+    ```
+
+ *  New: Add `cacheHit`, `cacheMiss`, and `cacheConditionalHit()` events to `EventListener`. Use
+    these in logs, metrics, and even test cases to confirm your cache headers are configured as
+    expected.
+
+ *  New: Constant string `okhttp3.VERSION`. This is a string like "4.5.0-RC1", "4.5.0", or
+    "4.6.0-SNAPSHOT" indicating the version of OkHttp in the current runtime. Use this to include
+    the OkHttp version in custom `User-Agent` headers.
+
+ *  Fix: Don't crash when running as a plugin in Android Studio Canary 4.1. To enable
+    platform-specific TLS features OkHttp must detect whether it's running in a JVM or in Android.
+    The upcoming Android Studio runs in a JVM but has classes from Android and that confused OkHttp!
+
+ *  Fix: Include the header `Accept: text/event-stream` for SSE calls. This header is not added if
+    the request already contains an `Accept` header.
+
+ *  Fix: Don't crash with a `NullPointerException` if a server sends a close while we're sending a
+    ping. OkHttp had a race condition bug.
+
+
+## Version 4.6.0
+
+_2020-04-28_
+
+ *  Fix: Follow HTTP 307 and 308 redirects on methods other than GET and POST. We're reluctant to
+    change OkHttp's behavior in handling common HTTP status codes, but this fix is overdue! The new
+    behavior is now consistent with [RFC 7231][rfc_7231_647], which is newer than OkHttp itself.
+    If you want this update with the old behavior use [this interceptor][legacy_interceptor].
+
+ *  Fix: Don't crash decompressing web sockets messages. We had a bug where we assumed deflated
+    bytes in would always yield deflated bytes out and this isn't always the case!
+
+ *  Fix: Reliably update and invalidate the disk cache on windows. As originally designed our
+    internal `DiskLruCache` assumes an inode-like file system, where it's fine to delete files that
+    are currently being read or written. On Windows the file system forbids this so we must be more
+    careful when deleting and renaming files.
+
+ *  Fix: Don't crash on Java 8u252 which introduces an API previously found only on Java 9 and
+    above. See [Jetty's overview][jetty_8_252] of the API change and its consequences.
+
+ *  New: `MultipartReader` is a streaming decoder for [MIME multipart (RFC 2045)][rfc_2045]
+    messages. It complements `MultipartBody` which is our streaming encoder.
+
+    ```kotlin
+    val response: Response = call.execute()
+    val multipartReader = MultipartReader(response.body!!)
+
+    multipartReader.use {
+      while (true) {
+        val part = multipartReader.nextPart() ?: break
+        process(part.headers, part.body)
+      }
+    }
+    ```
+
+ *  New: `MediaType.parameter()` gets a parameter like `boundary` from a media type like
+    `multipart/mixed; boundary="abc"`.
+
+ *  New: `Authenticator.JAVA_NET_AUTHENTICATOR` forwards authentication requests to
+    `java.net.Authenticator`. This obsoletes `JavaNetAuthenticator` in the `okhttp-urlconnection`
+    module.
+
+ *  New: `CertificatePinner` now offers an API for inspecting the configured pins.
+
+ *  Upgrade: [Okio 2.6.0][okio_2_6_0].
+
+    ```kotlin
+    implementation("com.squareup.okio:okio:2.6.0")
+    ```
+
+ *  Upgrade: [publicsuffix.org data][public_suffix]. This powers `HttpUrl.topPrivateDomain()`.
+    It's also how OkHttp knows which domains can share cookies with one another.
+
+ *  Upgrade: [Bouncy Castle 1.65][bouncy_castle_releases]. This dependency is required by the
+    `okhttp-tls` module.
+
+ *  Upgrade: [Kotlin 1.3.71][kotlin_1_3_71].
+
+
 ## Version 4.5.0
 
 _2020-04-06_
@@ -316,7 +491,20 @@ _2019-06-03_
 
 
  [bom]: https://docs.gradle.org/6.2/userguide/platforms.html#sub:bom_import
+ [bouncy_castle_releases]: https://www.bouncycastle.org/releasenotes.html
+ [dev_server]: https://github.com/square/okhttp/blob/482f88300f78c3419b04379fc26c3683c10d6a9d/samples/guide/src/main/java/okhttp3/recipes/kt/DevServer.kt
+ [fun_interface]: https://kotlinlang.org/docs/reference/fun-interfaces.html
  [iana_websocket]: https://www.iana.org/assignments/websocket/websocket.txt
+ [jetty_8_252]: https://webtide.com/jetty-alpn-java-8u252/
+ [kotlin_1_3_71]: https://github.com/JetBrains/kotlin/releases/tag/v1.3.71
+ [kotlin_1_4_10]: https://github.com/JetBrains/kotlin/releases/tag/v1.4.10
+ [legacy_interceptor]: https://gist.github.com/swankjesse/80135f4e03629527e723ab3bcf64be0b
  [okhttp4_blog_post]: https://cashapp.github.io/2019-06-26/okhttp-4-goes-kotlin
+ [okio_2_6_0]: https://square.github.io/okio/changelog/#version-260
+ [okio_2_7_0]: https://square.github.io/okio/changelog/#version-270
+ [public_suffix]: https://publicsuffix.org/
  [upgrading_to_okhttp_4]: https://square.github.io/okhttp/upgrading_to_okhttp_4/
+ [rfc_2045]: https://tools.ietf.org/html/rfc2045
+ [rfc_7231_647]: https://tools.ietf.org/html/rfc7231#section-6.4.7
  [rfc_7692]: https://tools.ietf.org/html/rfc7692
+ [semver]: https://semver.org/
